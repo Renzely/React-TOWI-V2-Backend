@@ -18,10 +18,7 @@ const uri =
   "mongodb+srv://NewClientApp:NewClientAppPass@towi.v2djp3n.mongodb.net/ReactTOWI?retryWrites=true&w=majority&appName=TOWI";
 
 mongoose
-  .connect(uri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
+  .connect(uri)
   .then(() => console.log("✅ Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
