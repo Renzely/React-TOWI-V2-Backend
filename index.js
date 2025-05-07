@@ -42,6 +42,10 @@ app.post("/inventory/grouped", async (req, res) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.json({ status: "started" });
+});
+
 // INVENTORY LOCK
 
 app.post("/lock", async (req, res) => {
