@@ -33,9 +33,10 @@ const versionSchema = new mongoose.Schema(
 );
 
 const groupedInventorySchema = new mongoose.Schema({
+  email: String,
   date: String,
   merchandiser: String,
-  branch: String,
+  outlet: String,
   weeksCovered: String,
   month: String,
   week: String,
