@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
+  outlet: [{ type: String }],
   firstName: { type: String, required: true },
   middleName: { type: String }, // Optional
   lastName: { type: String, required: true },
@@ -8,6 +9,7 @@ const userSchema = new mongoose.Schema({
   contactNumber: { type: String, required: true },
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true }, // Hashed
+  isVerified: { type: Boolean, default: false },
 });
 
 const User = mongoose.model("User", userSchema);
