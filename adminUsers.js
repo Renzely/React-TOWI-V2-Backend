@@ -9,7 +9,6 @@ const AdminUserSchema = new mongoose.Schema(
     lastName: String,
     emailAddress: { type: String, unique: true },
     contactNum: String,
-    username: String,
     password: String,
     isVerified: Boolean,
     outlet: [String],

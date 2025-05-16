@@ -296,7 +296,6 @@ app.post("/register-user-admin", async (req, res) => {
     contactNum,
     password,
     roleAccount,
-    username,
     outlet,
     remarks,
   } = req.body;
@@ -325,7 +324,6 @@ app.post("/register-user-admin", async (req, res) => {
       emailAddress,
       contactNum,
       password: encryptedPassword,
-      username,
       roleAccount,
       remarks: remarks || "",
       isVerified: false,
@@ -502,13 +500,12 @@ app.post("/login-admin", async (req, res) => {
 
 app.post("/signup", async (req, res) => {
   const {
-    branch,
+    outlet,
     firstName,
     middleName,
     lastName,
     email,
     contactNumber,
-    username,
     password,
   } = req.body;
 
@@ -523,13 +520,12 @@ app.post("/signup", async (req, res) => {
 
   // Create new user with isVerified set to false
   const newUser = new User({
-    branch,
+    outlet,
     firstName,
     middleName,
     lastName,
     email,
     contactNumber,
-    username,
     password: hashedPassword,
     isVerified: false,
   });
