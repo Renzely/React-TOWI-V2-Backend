@@ -1,11 +1,11 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-
+const AWS = require("aws-sdk");
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+const Attendance = require("./attendance");
 const Inventory = require("./inventoryProcess");
 const bcrypt = require("bcryptjs");
 const User = require("./users");
@@ -25,6 +25,172 @@ mongoose
   .connect(uri)
   .then(() => console.log("✅ Connected to MongoDB Atlas"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
+
+// ATTENDANCE
+
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION,
+});
+
+app.post("/save-attendance-images", (req, res) => {
+  const { fileName } = req.body;
+
+  const params = {
+    Bucket: "towi-react-attendance",
+    Key: fileName,
+    Expires: 60,
+    ContentType: "image/jpeg",
+  };
+
+  s3.getSignedUrl("putObject", params, (err, url) => {
+    if (err) {
+      return res
+        .status(500)
+        .json({ error: "Failed to generate pre-signed URL" });
+    }
+
+    res.json({ url });
+  });
+});
+
+function parseDateTime(dateStr, timeStr) {
+  const date = new Date(dateStr);
+
+  const dateTimeStr = `${dateStr} ${timeStr}`;
+  const dateTime = new Date(dateTimeStr);
+
+  if (isNaN(dateTime)) {
+    return date;
+  }
+  return dateTime;
+}
+
+// Route to handle time-in
+app.post("/attendance/time-in", async (req, res) => {
+  try {
+    const {
+      email,
+      date,
+      outlet,
+      timeIn,
+      selfieUrl,
+      location,
+      timeInLocation, // accept from client
+    } = req.body;
+
+    if (
+      !email ||
+      !date ||
+      !outlet ||
+      !timeIn ||
+      !selfieUrl ||
+      !location?.latitude ||
+      !location?.longitude
+    ) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    const dateObj = new Date(date);
+    const timeInObj = parseDateTime(date, timeIn);
+
+    let attendance = await Attendance.findOne({ email, date: dateObj });
+
+    const timeLog = {
+      outlet,
+      timeIn: timeInObj,
+      // use timeInLocation if provided, else fallback to coordinates string
+      timeInLocation:
+        timeInLocation ||
+        `Lat: ${location.latitude}, Long: ${location.longitude}`,
+      timeInCoordinates: {
+        latitude: location.latitude,
+        longitude: location.longitude,
+      },
+      timeInSelfieUrl: selfieUrl,
+    };
+
+    if (attendance) {
+      attendance.timeLogs.push(timeLog);
+    } else {
+      attendance = new Attendance({
+        email,
+        date: dateObj,
+        timeLogs: [timeLog],
+      });
+    }
+
+    await attendance.save();
+    return res.status(200).json({ message: "Time-in recorded successfully." });
+  } catch (error) {
+    console.error("Time-in error:", error);
+    return res.status(500).json({ error: "Failed to save time-in." });
+  }
+});
+
+// Route to handle time-out
+app.post("/attendance/time-out", async (req, res) => {
+  try {
+    const {
+      email,
+      date,
+      outlet,
+      timeOut,
+      timeOutSelfieUrl,
+      location,
+      timeOutLocation, // accept from client
+    } = req.body;
+
+    if (
+      !email ||
+      !date ||
+      !outlet ||
+      !timeOut ||
+      !timeOutSelfieUrl ||
+      !location?.latitude ||
+      !location?.longitude
+    ) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    const dateObj = new Date(date);
+    const timeOutObj = parseDateTime(date, timeOut);
+
+    const attendance = await Attendance.findOne({ email, date: dateObj });
+
+    if (!attendance) {
+      return res.status(404).json({ error: "Attendance record not found." });
+    }
+
+    const lastTimeLog = [...attendance.timeLogs]
+      .reverse()
+      .find((log) => log.outlet === outlet && !log.timeOut);
+
+    if (!lastTimeLog) {
+      return res.status(404).json({
+        error: "No corresponding time-in record found for this outlet.",
+      });
+    }
+
+    lastTimeLog.timeOut = timeOutObj;
+    // use timeOutLocation if provided, else fallback to coordinates string
+    lastTimeLog.timeOutLocation =
+      timeOutLocation ||
+      `Lat: ${location.latitude}, Long: ${location.longitude}`;
+    lastTimeLog.timeOutCoordinates = {
+      latitude: location.latitude,
+      longitude: location.longitude,
+    };
+    lastTimeLog.timeOutSelfieUrl = timeOutSelfieUrl;
+
+    await attendance.save();
+    return res.status(200).json({ message: "Time-out recorded successfully." });
+  } catch (error) {
+    console.error("Time-out error:", error);
+    return res.status(500).json({ error: "Failed to save time-out." });
+  }
+});
 
 // INVENTORY
 
