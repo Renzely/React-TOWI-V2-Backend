@@ -67,8 +67,6 @@ function parseDateTime(dateStr, timeStr) {
   return dateTime;
 }
 
-// Helper: parseDateTime implementation assumed to be defined somewhere
-
 // Route to handle time-in
 app.post("/attendance/time-in", async (req, res) => {
   try {
