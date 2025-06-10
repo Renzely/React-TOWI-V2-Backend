@@ -45,9 +45,7 @@ const groupedInventorySchema = new mongoose.Schema({
     default: false,
   },
   versions: {
-    V1: versionSchema,
-    V2: versionSchema,
-    V3: versionSchema,
+    SKU: versionSchema,
   },
 });
 
