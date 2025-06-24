@@ -11,15 +11,16 @@ const bcrypt = require("bcryptjs");
 const User = require("./users");
 const AdminUser = require("./adminUsers");
 const authMiddleware = require("./auth");
+const auth = require("./auth");
 const jwt = require("jsonwebtoken");
+const { DateTime } = require("luxon");
 require("dotenv").config();
 
 const nodemailer = require("nodemailer");
 const Otp = require("./otp");
 
 // MongoDB Atlas connection
-const uri =
-  "mongodb+srv://NewClientApp:NewClientAppPass@towi.v2djp3n.mongodb.net/ReactTOWI?retryWrites=true&w=majority&appName=TOWI";
+const uri = process.env.uri;
 
 mongoose
   .connect(uri)
@@ -55,17 +56,244 @@ app.post("/save-attendance-images", (req, res) => {
   });
 });
 
-function parseDateTime(dateStr, timeStr) {
+function createPhilippineDate(dateStr) {
   const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
 
-  const dateTimeStr = `${dateStr} ${timeStr}`;
-  const dateTime = new Date(dateTimeStr);
-
-  if (isNaN(dateTime)) {
-    return date;
-  }
-  return dateTime;
+  // Create date at midnight Philippine time
+  const isoString = `${year}-${String(month + 1).padStart(2, "0")}-${String(
+    day
+  ).padStart(2, "0")}T00:00:00.000+08:00`;
+  return new Date(isoString);
 }
+
+app.put("/forgot-password-reset", async (req, res) => {
+  const { password, emailAddress } = req.body;
+
+  const encryptedPassword = await bcrypt.hash(password, 8);
+
+  console.log(emailAddress);
+  try {
+    await AdminUser.findOneAndUpdate(
+      { emailAddress: emailAddress },
+      { $set: { password: encryptedPassword } }
+    );
+    res.send({ status: 200, data: "Password updated" });
+  } catch (error) {
+    res.send({ status: "error", data: error });
+  }
+});
+
+app.post("/forgot-password", async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Save OTP in the Otp collection with purpose "reset-password"
+    await Otp.create({
+      email,
+      otp,
+      purpose: "reset-password",
+      createdAt: new Date(),
+    });
+
+    // Send OTP via email
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Password Reset OTP",
+      text: `Your OTP is: ${otp}`,
+    });
+
+    res.status(200).json({ message: "OTP sent to email" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to send OTP" });
+  }
+});
+
+app.post("/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+
+    res.status(200).json({ message: "Password has been reset successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Reset failed" });
+  }
+});
+
+app.get("/user/outlets", auth, async (req, res) => {
+  try {
+    const userEmail = req.user.email; // Make sure this comes from decoded token
+
+    if (!userEmail)
+      return res.status(400).json({ error: "Missing user email" });
+
+    const user = await User.findOne({ email: userEmail });
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    res.json(user.outlet || []);
+  } catch (error) {
+    console.error("Error in /user/outlets:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get("/attendance/status", async (req, res) => {
+  const { email, outlet, date } = req.query;
+  try {
+    // Use the same createPhilippineDate function from your time-in/time-out endpoints
+    const dateObj = createPhilippineDate(date);
+    const attendance = await Attendance.findOne({ email, date: dateObj });
+
+    if (!attendance) {
+      return res.json({
+        hasTimedIn: false,
+        hasTimedOut: false,
+        timeInTimestamp: null,
+        timeOutTimestamp: null,
+        addressTimeIn: null,
+        addressTimeOut: null,
+        timeInSelfieUri: null,
+        timeOutSelfieUri: null,
+      });
+    }
+
+    // Assuming attendance.timeLogs is an array of logs for outlets and timestamps
+    const log = attendance.timeLogs.find((log) => log.outlet === outlet);
+    if (!log) {
+      return res.json({
+        hasTimedIn: false,
+        hasTimedOut: false,
+        timeInTimestamp: null,
+        timeOutTimestamp: null,
+        addressTimeIn: null,
+        addressTimeOut: null,
+        timeInSelfieUri: null,
+        timeOutSelfieUri: null,
+      });
+    }
+
+    return res.json({
+      hasTimedIn: !!log.timeIn,
+      hasTimedOut: !!log.timeOut,
+      timeInTimestamp: log.timeIn || null,
+      timeOutTimestamp: log.timeOut || null,
+      addressTimeIn: log.timeInLocation || null,
+      addressTimeOut: log.timeOutLocation || null,
+      timeInSelfieUri: log.timeInSelfieUrl || null,
+      timeOutSelfieUri: log.timeOutSelfieUrl || null,
+    });
+  } catch (err) {
+    console.error("Error fetching attendance status:", err);
+    return res.status(500).json({ error: "Failed to fetch attendance status" });
+  }
+});
+
+app.get("/attendance/history", async (req, res) => {
+  const { email } = req.query;
+  try {
+    const attendanceList = await Attendance.find({ email }).sort({ date: -1 });
+
+    const history = attendanceList.map((attendance) => {
+      return {
+        date: attendance.date,
+        timeLogs: attendance.timeLogs.map((log) => ({
+          outlet: log.outlet,
+          timeIn: log.timeIn,
+          timeOut: log.timeOut,
+          addressTimeIn: log.timeInLocation,
+          addressTimeOut: log.timeOutLocation,
+          timeInSelfieUri: log.timeInSelfieUrl,
+          timeOutSelfieUri: log.timeOutSelfieUrl,
+        })),
+      };
+    });
+
+    res.json(history);
+  } catch (err) {
+    console.error("Error fetching attendance history:", err);
+    res.status(500).json({ error: "Failed to fetch attendance history" });
+  }
+});
+
+app.post("/get-attendance", async (req, res) => {
+  try {
+    const { email, startDate, endDate } = req.body;
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email required" });
+    }
+
+    const range = {};
+    if (startDate) range.$gte = new Date(`${startDate}T00:00:00.000Z`);
+    if (endDate) range.$lte = new Date(`${endDate}T23:59:59.999Z`);
+
+    const query = { email };
+    if (Object.keys(range).length) query.createdAt = range;
+
+    const records = await Attendance.find(query).sort({ createdAt: 1 });
+
+    if (!records.length) {
+      return res.json({ success: true, data: [] });
+    }
+
+    let counter = 1;
+    const flat = records.flatMap((att) =>
+      att.timeLogs.map((log) => ({
+        count: counter++,
+        email: att.email,
+        // keep the original human‑readable string for UI
+        date: att.date,
+
+        outlet: log.outlet ?? "",
+        timeIn: log.timeIn ?? null,
+        timeOut: log.timeOut ?? null,
+
+        hasTimedIn: Boolean(log.timeIn),
+        hasTimedOut: Boolean(log.timeOut),
+
+        timeInLocation: log.timeInLocation ?? "No location provided",
+        timeOutLocation: log.timeOutLocation ?? "No location provided",
+
+        timeInCoordinates: log.timeInCoordinates ?? {
+          latitude: 0,
+          longitude: 0,
+        },
+        timeOutCoordinates: log.timeOutCoordinates ?? {
+          latitude: 0,
+          longitude: 0,
+        },
+
+        timeInSelfieUrl: log.timeInSelfieUrl ?? "",
+        timeOutSelfieUrl: log.timeOutSelfieUrl ?? "",
+      }))
+    );
+
+    res.json({ success: true, data: flat });
+  } catch (err) {
+    console.error("Error in /get-attendance:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
 
 // Route to handle time-in
 app.post("/attendance/time-in", async (req, res) => {
@@ -92,8 +320,9 @@ app.post("/attendance/time-in", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields." });
     }
 
-    const dateObj = new Date(date);
-    const timeInObj = parseDateTime(date, timeIn);
+    const philippineNow = DateTime.now().setZone("Asia/Manila");
+    const dateObj = philippineNow.startOf("day").toJSDate(); // e.g. 2025-06-20T00:00:00
+    const timeInObj = philippineNow.toJSDate(); // current full timestamp
 
     let attendance = await Attendance.findOne({ email, date: dateObj });
 
@@ -154,8 +383,9 @@ app.post("/attendance/time-out", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields." });
     }
 
-    const dateObj = new Date(date);
-    const timeOutObj = parseDateTime(date, timeOut);
+    const philippineNow = DateTime.now().setZone("Asia/Manila");
+    const dateObj = philippineNow.startOf("day").toJSDate(); // e.g. 2025-06-20T00:00:00
+    const timeOutObj = philippineNow.toJSDate();
 
     const attendance = await Attendance.findOne({ email, date: dateObj });
 
@@ -784,6 +1014,7 @@ app.post("/login", async (req, res) => {
     const payload = {
       user: {
         id: user.id,
+        email: user.email,
       },
     };
 
