@@ -1,5 +1,13 @@
 const mongoose = require("mongoose");
 
+const expiryEntrySchema = new mongoose.Schema(
+  {
+    month: String,
+    quantity: Number,
+  },
+  { _id: false }
+);
+
 const skuSchema = new mongoose.Schema(
   {
     sku: String,
@@ -9,8 +17,7 @@ const skuSchema = new mongoose.Schema(
     endingPCS: Number,
     offtake: Number,
     inventoryDays: Number,
-    expiryMonths: String,
-    expiryQty: Number,
+    expiry: [expiryEntrySchema],
   },
   { _id: false }
 );
