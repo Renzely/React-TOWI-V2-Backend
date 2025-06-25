@@ -484,6 +484,17 @@ app.post("/inventory/grouped", async (req, res) => {
         .json({ success: false, message: "Missing userEmail" });
     }
 
+    // Optional: Validate expiry format (if needed)
+    Object.keys(versions).forEach((versionKey) => {
+      const carriedList = versions[versionKey]?.Carried || [];
+      carriedList.forEach((skuItem) => {
+        if (skuItem.expiry && !Array.isArray(skuItem.expiry)) {
+          throw new Error(`Invalid expiry format for SKU: ${skuItem.skuCode}`);
+        }
+      });
+    });
+
+    // Save the full structure as-is
     const newInventory = await Inventory.create({
       email,
       date,
@@ -500,7 +511,7 @@ app.post("/inventory/grouped", async (req, res) => {
       data: newInventory,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error saving inventory:", error.message);
     res.status(500).json({
       success: false,
       message: "Error saving inventory",
@@ -651,6 +662,17 @@ app.post("/export-inventory-towi", async (req, res) => {
 
     const formatted = [];
 
+    // 👇 Helper function to convert expiry array to string
+    const formatExpiry = (expiry = []) => {
+      return expiry
+        .filter((e) => e.quantity > 0 && e.month !== "")
+        .map(
+          (e) =>
+            `${e.month} Month${e.month !== "1" ? "s" : ""} - Qty: ${e.quantity}`
+        )
+        .join(" || ");
+    };
+
     data.forEach((record, index) => {
       ["V1", "V2", "V3"].forEach((versionKey) => {
         const version = record.versions?.[versionKey];
@@ -673,17 +695,16 @@ app.post("/export-inventory-towi", async (req, res) => {
               status,
               beginning:
                 status === "Carried"
-                  ? sku.beginningPCS || 0
+                  ? sku.beginningPCS ?? 0
                   : status === "Not Carried"
                   ? "NC"
                   : "Delisted",
-              delivery: status === "Carried" ? sku.deliveryPCS || 0 : "",
-              ending: status === "Carried" ? sku.endingPCS || 0 : "",
-              offtake: status === "Carried" ? sku.offtake || 0 : "",
+              delivery: status === "Carried" ? sku.deliveryPCS ?? 0 : "",
+              ending: status === "Carried" ? sku.endingPCS ?? 0 : "",
+              offtake: status === "Carried" ? sku.offtake ?? 0 : "",
               inventoryDaysLevel:
-                status === "Carried" ? sku.inventoryDays || 0 : "",
-              expiryMonth: status === "Carried" ? sku.expiryMonths || "" : "",
-              expiryQty: status === "Carried" ? sku.expiryQty || 0 : "",
+                status === "Carried" ? sku.inventoryDays ?? 0 : "",
+              expiry: status === "Carried" ? formatExpiry(sku.expiry) : "",
             });
           });
         });
